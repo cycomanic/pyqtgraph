@@ -432,5 +432,81 @@ class GLViewWidget(QtOpenGL.QGLWidget):
             
         return output
         
-        
-        
+
+class GLViewWidget2D(GLViewWidget):
+    def __init__(self, parent=None, center_default=None,
+            fov_default=None):
+        super(GLViewWidget2D, self).__init__(parent)
+        self.opts = {}
+        if center_default is None:
+            self.opts['center_default'] = np.asarray([0., 0.],
+                                        dtype='float')
+        else:
+            self.opts['center_default'] = np.asarray(center_default,
+                    dtype='float')
+        self.opts['center'] = self.opts['center_default'].copy()
+        if fov_default is None:
+            self.opts['fov_default'] = np.asarray([2., 2.], 
+                    dtype='float')
+        else:
+            self.opts['fov_default'] = np.asarray(fov_default,
+                    dtype='float')
+        self.opts['fov'] = self.opts['fov_default'].copy()
+        self.opts['viewport'] = None
+        self.opts['distance'] = None
+
+    def setProjection(self, region=None):
+        ## Create the projection matrix
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        center = self.opts['center']
+        fov = self.opts['fov']
+        x0 = center[0]-fov[0]/2.
+        xend = center[0]+fov[0]/2.
+        y0 = center[1]-fov[1]/2.
+        yend = center[1]+fov[1]/2.
+        glOrtho(x0, xend, y0, yend, 0,100)
+
+    def setModelview(self):
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+
+    def pan(self, dx, dy):
+        self.opts['center'] = np.array([self.opts['center'][0]-dx,
+                                self.opts['center'][1]+dy])
+        self.update()
+
+    def zoom(self, factor):
+        self.opts['fov'] *= factor
+        self.update()
+
+    def mousePressEvent(self, ev):
+        self.mousePos = ev.pos()
+        if ev.buttons() == QtCore.Qt.RightButton:
+            self.opts['center'] = self.opts['center_default'].copy()
+            self.opts['fov'] = self.opts['fov_default'].copy()
+            self.update()
+
+    def mouseMoveEvent(self, ev):
+        diff = ev.pos() - self.mousePos
+        self.mousePos = ev.pos()
+        if ev.buttons() == QtCore.Qt.LeftButton:
+            dx = np.float(diff.x())/self.width()*self.opts['fov'][0]
+            dy = np.float(diff.y())/self.height()*self.opts['fov'][1]
+            self.pan(dx, dy)
+
+    def mouseReleaseEvent(self, ev):
+        pass
+
+    def wheelEvent(self, ev):
+        pos = ev.pos()
+        x0 = self.opts['center'][0]
+        y0 = self.opts['center'][1]
+        x = x0+(pos.x()/np.float(self.width())-0.5)*self.opts['fov'][0]
+        y = y0+(0.5-pos.y()/np.float(self.height()))*self.opts['fov'][1]
+        dx = (x0-x)*(1-0.999**ev.delta())
+        dy = (y0-y)*(1-0.999**ev.delta())
+        self.opts['center'][1] -= dy
+        self.opts['center'][0] -= dx
+        self.zoom(0.999**ev.delta())
+ 

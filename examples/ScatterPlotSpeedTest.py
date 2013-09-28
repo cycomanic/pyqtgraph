@@ -20,6 +20,7 @@ from pyqtgraph.ptime import time
 app = QtGui.QApplication([])
 #mw = QtGui.QMainWindow()
 #mw.resize(800,800)
+USE_PYSIDE=True
 if USE_PYSIDE:
     from ScatterPlotSpeedTestTemplate_pyside import Ui_Form
 else:
