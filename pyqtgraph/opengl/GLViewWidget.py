@@ -157,7 +157,103 @@ class GLCamera3D(QtGui.QWidget):
         self.opts['viewport'] = viewport
      
 
-class GLViewWidget(QtOpenGL.QGLWidget, GLCamera3D):
+class GLCamera2D(QtGui.QWidget):
+    def __init__(self, *args, **kwargs):
+        super(GLCamera2D, self).__init__(*args, **kwargs)
+        self.opts = {
+            'center': Vector(0,0,0),  ## will always appear at the center of the widget
+            'viewarea':  [2.,2],     ## horizontal field of view in degrees
+            'azimuth': 0,             ## camera's azimuthal angle in degrees 
+                                      ## (rotation around z-axis 0 points along x-axis)
+            'viewport': None,         ## glViewport params; None == whole widget
+        }
+
+    def setProjection(self, region=None):
+        m = self.projectionMatrix(region)
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        glOrtho(m[0], m[1], m[2], m[3], -1, 1)
+
+    def screen2worldcoord(self, x, y):
+        ww, hw = self.opts['viewarea']
+        x0s, y0s, ws, hs = self.getViewport()
+        center = self.opts['center']
+        xn = center.x() + ((x-x0s)/ws-0.5)*ww
+        yn = center.y() + (0.5-(y-y0s)/hs)*hw
+        return xn, yn
+
+    def projectionMatrix(self, region=None):
+        if region is None:
+            region = (0, 0, self.width(), self.height())
+        left, bottom = self.screen2worldcoord(region[0], region[1])
+        right, top = self.screen2worldcoord(region[0]+region[2],
+                region[1]+region[3])
+        return left, right, bottom, top
+
+    def setModelview(self):
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        glTranslate(-self.opts['center'].x(), -self.opts['center'].y(), 0)
+        glRotate(self.opts['azimuth'], 0, 0, -1)
+
+    def setCameraPosition(self, pos=None):
+        if pos is not None:
+            self.opts['center'] = QtGui.QVector3D(pos)
+        self.update()
+
+    def cameraPosition(self):
+        """Return current position of camera """
+        return self.opts['center']
+
+    def pan(self, dx, dy, relative=False):
+        """
+        Moves the center (look-at) position while holding the camera in place. 
+        
+        If relative=True, then the coordinates are interpreted such that x
+        if in the global xy plane and points to the right side of the view, y is
+        in the global xy plane and orthogonal to x, and z points in the global z
+        direction. Distances are scaled roughly such that a value of 1.0 moves
+        by one pixel on screen.
+        
+        """
+        if not relative:
+            self.opts['center'] += QtGui.QVector3D(dx, dy, 0)
+        else:
+            xScale = 0.5*float(self.opts['viewarea'][0])/self.width()
+            yScale = 0.5*float(self.opts['viewarea'][1])/self.height()
+            self.opts['center'] = self.opts['center'] + QtGui.QVector3D(dx, 0,
+                    0)*xScale + QtGui.QVector3D(0, dy, 0)*yScale
+        self.update()
+
+    def rotate(self, azim):
+        """rotates the camera around the center position. *azim* is given in degrees."""
+        self.opts['azimuth'] += azim
+        self.update()
+
+    def pixelSize(self, pos):
+        """
+        Return the approximate (x) size of a screen pixel at the location pos
+        """
+        xDist = float(self.opts['viewarea'][0])
+        return xDist / self.width()
+
+    def zoom(self, delta, mod=False):
+        self.opts['viewarea'][0] *= 0.999**delta
+        self.opts['viewarea'][1] *= 0.999**delta
+        self.update()
+
+    def getViewport(self):
+        vp = self.opts['viewport']
+        if vp is None:
+            return (0, 0, self.width(), self.height())
+        else:
+            return vp
+
+    def setViewport(self, viewport):
+        self.opts['viewport'] = viewport
+     
+ 
+class GLViewWidgetBase(QtOpenGL.QGLWidget):
     """
     Basic widget for displaying 3D data
         - Rotation/scale controls
@@ -174,9 +270,7 @@ class GLViewWidget(QtOpenGL.QGLWidget, GLCamera3D):
             GLViewWidget.ShareWidget = QtOpenGL.QGLWidget()
             
         #QtOpenGL.QGLWidget.__init__(self, parent, GLViewWidget.ShareWidget)
-        super(GLViewWidget, self).__init__(parent,
-                GLViewWidget.ShareWidget)
-        #GLCamera3D.__init__(self)
+        super(GLViewWidgetBase, self).__init__(parent, GLViewWidget.ShareWidget)
 
         self.setFocusPolicy(QtCore.Qt.ClickFocus)
         
@@ -451,80 +545,38 @@ class GLViewWidget(QtOpenGL.QGLWidget, GLCamera3D):
         return output
         
 
-#class GLViewWidget2D(GLViewWidget):
-#    def __init__(self, parent=None, center_default=None,
-#            fov_default=None):
-#        super(GLViewWidget2D, self).__init__(parent)
-#        self.opts = {}
-#        if center_default is None:
-#            self.opts['center_default'] = np.asarray([0., 0.],
-#                                        dtype='float')
-#        else:
-#            self.opts['center_default'] = np.asarray(center_default,
-#                    dtype='float')
-#        self.opts['center'] = self.opts['center_default'].copy()
-#        if fov_default is None:
-#            self.opts['fov_default'] = np.asarray([2., 2.], 
-#                    dtype='float')
-#        else:
-#            self.opts['fov_default'] = np.asarray(fov_default,
-#                    dtype='float')
-#        self.opts['fov'] = self.opts['fov_default'].copy()
-#        self.opts['viewport'] = None
-#        self.opts['distance'] = None
-#
-#    def setProjection(self, region=None):
-#        ## Create the projection matrix
-#        glMatrixMode(GL_PROJECTION)
-#        glLoadIdentity()
-#        center = self.opts['center']
-#        fov = self.opts['fov']
-#        x0 = center[0]-fov[0]/2.
-#        xend = center[0]+fov[0]/2.
-#        y0 = center[1]-fov[1]/2.
-#        yend = center[1]+fov[1]/2.
-#        glOrtho(x0, xend, y0, yend, 0,100)
-#
-#    def setModelview(self):
-#        glMatrixMode(GL_MODELVIEW)
-#        glLoadIdentity()
-#
-#    def pan(self, dx, dy):
-#        self.opts['center'] = np.array([self.opts['center'][0]-dx,
-#                                self.opts['center'][1]+dy])
-#        self.update()
-#
-#    def zoom(self, factor):
-#        self.opts['fov'] *= factor
-#        self.update()
-#
-#    def mousePressEvent(self, ev):
-#        self.mousePos = ev.pos()
-#        if ev.buttons() == QtCore.Qt.RightButton:
-#            self.opts['center'] = self.opts['center_default'].copy()
-#            self.opts['fov'] = self.opts['fov_default'].copy()
-#            self.update()
-#
-#    def mouseMoveEvent(self, ev):
-#        diff = ev.pos() - self.mousePos
-#        self.mousePos = ev.pos()
-#        if ev.buttons() == QtCore.Qt.LeftButton:
-#            dx = np.float(diff.x())/self.width()*self.opts['fov'][0]
-#            dy = np.float(diff.y())/self.height()*self.opts['fov'][1]
-#            self.pan(dx, dy)
-#
-#    def mouseReleaseEvent(self, ev):
-#        pass
-#
-#    def wheelEvent(self, ev):
-#        pos = ev.pos()
-#        x0 = self.opts['center'][0]
-#        y0 = self.opts['center'][1]
-#        x = x0+(pos.x()/np.float(self.width())-0.5)*self.opts['fov'][0]
-#        y = y0+(0.5-pos.y()/np.float(self.height()))*self.opts['fov'][1]
-#        dx = (x0-x)*(1-0.999**ev.delta())
-#        dy = (y0-y)*(1-0.999**ev.delta())
-#        self.opts['center'][1] -= dy
-#        self.opts['center'][0] -= dx
-#        self.zoom(0.999**ev.delta())
-# 
+class GLViewWidget(GLViewWidgetBase, GLCamera3D):
+    pass
+
+class GLViewWidget2D(GLViewWidgetBase, GLCamera2D):
+    def evalKeyState(self):
+        speed = 1.0
+        if len(self.keysPressed) > 0:
+            for key in self.keysPressed:
+                if key == QtCore.Qt.Key_Right:
+                    self.pan(+speed, 0)
+                elif key == QtCore.Qt.Key_Left:
+                    self.pan(-speed, 0)
+                elif key == QtCore.Qt.Key_Up:
+                    self.pan(0, speed)
+                elif key == QtCore.Qt.Key_Down:
+                    self.pan(0, -speed)
+                elif key == QtCore.Qt.Key_PageUp:
+                    self.rotate(4*speed)
+                elif key == QtCore.Qt.Key_PageDown:
+                    self.rotate(-4*speed)
+                self.keyTimer.start(16)
+        else:
+            self.keyTimer.stop()
+
+    def mouseMoveEvent(self, ev):
+        diff = ev.pos() - self.mousePos
+        self.mousePos = ev.pos()
+        
+        if ev.buttons() == QtCore.Qt.MidButton:
+            self.rotate(-diff.x(), diff.y())
+        elif ev.buttons() == QtCore.Qt.LeftButton:
+            if (ev.modifiers() & QtCore.Qt.ControlModifier):
+                self.pan(-diff.x(), -diff.y(), relative=True)
+            else:
+                self.pan(-diff.x(), -diff.y(), relative=True)

@@ -1,4 +1,4 @@
-from .GLViewWidget import GLViewWidget
+from .GLViewWidget import GLViewWidget, GLViewWidget2D
 
 from pyqtgraph import importAll
 #import os
