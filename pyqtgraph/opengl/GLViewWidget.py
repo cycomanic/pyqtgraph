@@ -7,9 +7,9 @@ import pyqtgraph.functions as fn
 
 ##Vector = QtGui.QVector3D
 
-class GLCamera3D(QtGui.QWidget):
+class GLCamera3D(object):
     def __init__(self, *args, **kwargs):
-        super(GLCamera3D, self).__init__(*args, **kwargs)
+        #super(GLCamera3D, self).__init__(*args, **kwargs)
         self.opts = {
             'center': Vector(0,0,0),  ## will always appear at the center of the widget
             'distance': 10.0,         ## distance of camera from center
@@ -69,7 +69,7 @@ class GLCamera3D(QtGui.QWidget):
         tr.translate(-center.x(), -center.y(), -center.z())
         return tr
 
-    def setCameraPosition(self, pos=None, distance=None, elevation=None, azimuth=None):
+    def setPosition(self, pos=None, distance=None, elevation=None, azimuth=None):
         if distance is not None:
             self.opts['distance'] = distance
         if elevation is not None:
@@ -78,7 +78,7 @@ class GLCamera3D(QtGui.QWidget):
             self.opts['azimuth'] = azimuth
         self.update()       
 
-    def cameraPosition(self):
+    def getPosition(self):
         """Return current position of camera based on center, dist, elevation, and azimuth"""
         center = self.opts['center']
         dist = self.opts['distance']
@@ -168,7 +168,7 @@ class GLViewWidget(QtOpenGL.QGLWidget, GLCamera3D):
     
     ShareWidget = None
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, camera=GLCamera3D):
         if GLViewWidget.ShareWidget is None:
             ## create a dummy widget to allow sharing objects (textures, shaders, etc) between views
             GLViewWidget.ShareWidget = QtOpenGL.QGLWidget()
@@ -178,7 +178,9 @@ class GLViewWidget(QtOpenGL.QGLWidget, GLCamera3D):
                 GLViewWidget.ShareWidget)
         #GLCamera3D.__init__(self)
 
+
         self.setFocusPolicy(QtCore.Qt.ClickFocus)
+        self.camera = camera()
         
         self.items = []
         self.noRepeatKeys = [QtCore.Qt.Key_Right, QtCore.Qt.Key_Left, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down, QtCore.Qt.Key_PageUp, QtCore.Qt.Key_PageDown]
@@ -245,10 +247,19 @@ class GLViewWidget(QtOpenGL.QGLWidget, GLCamera3D):
             glViewport(*self.getViewport())
         else:
             glViewport(*viewport)
-        self.setProjection(region=region)
-        self.setModelview()
+        self.camera.setProjection(region=region)
+        self.camera.setModelview()
         glClear( GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT )
         self.drawItemTree(useItemNames=useItemNames)
+
+    def pixelSize(self):
+        return self.camera.pixelSize()
+
+    def cameraPosition(self):
+        return self.camera.getPosition()
+
+    def setCameraPosition(self, pos=None, distance=None, elevation=None, azimuth=None):
+        self.camera.setPosition(pos, distance, elevation, azimuth)
         
     def drawItemTree(self, item=None, useItemNames=False):
         if item is None:
@@ -303,22 +314,22 @@ class GLViewWidget(QtOpenGL.QGLWidget, GLCamera3D):
         self.mousePos = ev.pos()
         
         if ev.buttons() == QtCore.Qt.LeftButton:
-            self.orbit(-diff.x(), diff.y())
+            self.camera.orbit(-diff.x(), diff.y())
             #print self.opts['azimuth'], self.opts['elevation']
         elif ev.buttons() == QtCore.Qt.MidButton:
             if (ev.modifiers() & QtCore.Qt.ControlModifier):
-                self.pan(diff.x(), 0, diff.y(), relative=True)
+                self.camera.pan(diff.x(), 0, diff.y(), relative=True)
             else:
-                self.pan(diff.x(), diff.y(), 0, relative=True)
+                self.camera.pan(diff.x(), diff.y(), 0, relative=True)
         
     def mouseReleaseEvent(self, ev):
         pass
         
     def wheelEvent(self, ev):
         if (ev.modifiers() & QtCore.Qt.ControlModifier):
-            self.zoom(ev.delta(), mod=True)
+            self.camera.zoom(ev.delta(), mod=True)
         else:
-            self.zoom(ev.delta())
+            self.camera.zoom(ev.delta())
 
     def keyPressEvent(self, ev):
         if ev.key() in self.noRepeatKeys:
@@ -344,13 +355,13 @@ class GLViewWidget(QtOpenGL.QGLWidget, GLCamera3D):
         if len(self.keysPressed) > 0:
             for key in self.keysPressed:
                 if key == QtCore.Qt.Key_Right:
-                    self.orbit(azim=-speed, elev=0)
+                    self.camera.orbit(azim=-speed, elev=0)
                 elif key == QtCore.Qt.Key_Left:
-                    self.orbit(azim=speed, elev=0)
+                    self.camera.orbit(azim=speed, elev=0)
                 elif key == QtCore.Qt.Key_Up:
-                    self.orbit(azim=0, elev=-speed)
+                    self.camera.orbit(azim=0, elev=-speed)
                 elif key == QtCore.Qt.Key_Down:
-                    self.orbit(azim=0, elev=speed)
+                    self.camera.orbit(azim=0, elev=speed)
                 elif key == QtCore.Qt.Key_PageUp:
                     pass
                 elif key == QtCore.Qt.Key_PageDown:
