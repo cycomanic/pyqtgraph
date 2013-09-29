@@ -7,7 +7,157 @@ import pyqtgraph.functions as fn
 
 ##Vector = QtGui.QVector3D
 
-class GLViewWidget(QtOpenGL.QGLWidget):
+class GLCamera3D(QtGui.QWidget):
+    def __init__(self, *args, **kwargs):
+        super(GLCamera3D, self).__init__(*args, **kwargs)
+        self.opts = {
+            'center': Vector(0,0,0),  ## will always appear at the center of the widget
+            'distance': 10.0,         ## distance of camera from center
+            'fov':  60,               ## horizontal field of view in degrees
+            'elevation':  30,         ## camera's angle of elevation in degrees
+            'azimuth': 45,            ## camera's azimuthal angle in degrees 
+                                      ## (rotation around z-axis 0 points along x-axis)
+            'viewport': None,         ## glViewport params; None == whole widget
+        }
+
+    def setProjection(self, region=None):
+        m = self.projectionMatrix(region)
+        glMatrixMode(GL_PROJECTION)
+        glLoadIdentity()
+        a = np.array(m.copyDataTo()).reshape((4,4))
+        glMultMatrixf(a.transpose())
+
+    def projectionMatrix(self, region=None):
+        # Xw = (Xnd + 1) * width/2 + X
+        if region is None:
+            region = (0, 0, self.width(), self.height())
+
+        x0, y0, w, h = self.getViewport()
+        dist = self.opts['distance']
+        fov = self.opts['fov']
+        nearClip = dist * 0.001
+        farClip = dist * 1000.
+
+        r = nearClip * np.tan(fov * 0.5 * np.pi / 180.)
+        t = r * h / w
+
+        # convert screen coordinates (region) to normalized device coordinates
+        # Xnd = (Xw - X0) * 2/width - 1
+        ## Note that X0 and width in these equations must be the values used in viewport
+        left  = r * ((region[0]-x0) * (2.0/w) - 1)
+        right = r * ((region[0]+region[2]-x0) * (2.0/w) - 1)
+        bottom = t * ((region[1]-y0) * (2.0/h) - 1)
+        top    = t * ((region[1]+region[3]-y0) * (2.0/h) - 1)
+
+        tr = QtGui.QMatrix4x4()
+        tr.frustum(left, right, bottom, top, nearClip, farClip)
+        return tr
+
+    def setModelview(self):
+        glMatrixMode(GL_MODELVIEW)
+        glLoadIdentity()
+        m = self.viewMatrix()
+        a = np.array(m.copyDataTo()).reshape((4,4))
+        glMultMatrixf(a.transpose())
+
+    def viewMatrix(self):
+        tr = QtGui.QMatrix4x4()
+        tr.translate( 0.0, 0.0, -self.opts['distance'])
+        tr.rotate(self.opts['elevation']-90, 1, 0, 0)
+        tr.rotate(self.opts['azimuth']+90, 0, 0, -1)
+        center = self.opts['center']
+        tr.translate(-center.x(), -center.y(), -center.z())
+        return tr
+
+    def setCameraPosition(self, pos=None, distance=None, elevation=None, azimuth=None):
+        if distance is not None:
+            self.opts['distance'] = distance
+        if elevation is not None:
+            self.opts['elevation'] = elevation
+        if azimuth is not None:
+            self.opts['azimuth'] = azimuth
+        self.update()       
+
+    def cameraPosition(self):
+        """Return current position of camera based on center, dist, elevation, and azimuth"""
+        center = self.opts['center']
+        dist = self.opts['distance']
+        elev = self.opts['elevation'] * np.pi/180.
+        azim = self.opts['azimuth'] * np.pi/180.
+        
+        pos = Vector(
+            center.x() + dist * np.cos(elev) * np.cos(azim),
+            center.y() + dist * np.cos(elev) * np.sin(azim),
+            center.z() + dist * np.sin(elev)
+        )
+        
+        return pos
+
+    def pan(self, dx, dy, dz, relative=False):
+        """
+        Moves the center (look-at) position while holding the camera in place. 
+        
+        If relative=True, then the coordinates are interpreted such that x
+        if in the global xy plane and points to the right side of the view, y is
+        in the global xy plane and orthogonal to x, and z points in the global z
+        direction. Distances are scaled roughly such that a value of 1.0 moves
+        by one pixel on screen.
+        
+        """
+        if not relative:
+            self.opts['center'] += QtGui.QVector3D(dx, dy, dz)
+        else:
+            cPos = self.cameraPosition()
+            cVec = self.opts['center'] - cPos
+            dist = cVec.length()  ## distance from camera to center
+            xDist = dist * 2. * np.tan(0.5 * self.opts['fov'] * np.pi / 180.)  ## approx. width of view at distance of center point
+            xScale = xDist / self.width()
+            zVec = QtGui.QVector3D(0,0,1)
+            xVec = QtGui.QVector3D.crossProduct(zVec, cVec).normalized()
+            yVec = QtGui.QVector3D.crossProduct(xVec, zVec).normalized()
+            self.opts['center'] = self.opts['center'] + xVec * xScale * dx + yVec * xScale * dy + zVec * xScale * dz
+        self.update()
+
+    def orbit(self, azim, elev):
+        """Orbits the camera around the center position. *azim* and *elev* are given in degrees."""
+        self.opts['azimuth'] += azim
+        #self.opts['elevation'] += elev
+        self.opts['elevation'] = np.clip(self.opts['elevation'] + elev, -90, 90)
+        self.update()
+
+    def pixelSize(self, pos):
+        """
+        Return the approximate size of a screen pixel at the location pos
+        Pos may be a Vector or an (N,3) array of locations
+        """
+        cam = self.cameraPosition()
+        if isinstance(pos, np.ndarray):
+            cam = np.array(cam).reshape((1,)*(pos.ndim-1)+(3,))
+            dist = ((pos-cam)**2).sum(axis=-1)**0.5
+        else:
+            dist = (pos-cam).length()
+        xDist = dist * 2. * np.tan(0.5 * self.opts['fov'] * np.pi / 180.)
+        return xDist / self.width()
+
+    def zoom(self, delta, mod=False):
+        if mod:
+            self.opts['fov'] *= 0.999**delta
+        else:
+            self.opts['distance'] *= 0.999**delta
+        self.update()
+
+    def getViewport(self):
+        vp = self.opts['viewport']
+        if vp is None:
+            return (0, 0, self.width(), self.height())
+        else:
+            return vp
+
+    def setViewport(self, viewport):
+        self.opts['viewport'] = viewport
+     
+
+class GLViewWidget(QtOpenGL.QGLWidget, GLCamera3D):
     """
     Basic widget for displaying 3D data
         - Rotation/scale controls
@@ -23,19 +173,13 @@ class GLViewWidget(QtOpenGL.QGLWidget):
             ## create a dummy widget to allow sharing objects (textures, shaders, etc) between views
             GLViewWidget.ShareWidget = QtOpenGL.QGLWidget()
             
-        QtOpenGL.QGLWidget.__init__(self, parent, GLViewWidget.ShareWidget)
-        
+        #QtOpenGL.QGLWidget.__init__(self, parent, GLViewWidget.ShareWidget)
+        super(GLViewWidget, self).__init__(parent,
+                GLViewWidget.ShareWidget)
+        #GLCamera3D.__init__(self)
+
         self.setFocusPolicy(QtCore.Qt.ClickFocus)
         
-        self.opts = {
-            'center': Vector(0,0,0),  ## will always appear at the center of the widget
-            'distance': 10.0,         ## distance of camera from center
-            'fov':  60,               ## horizontal field of view in degrees
-            'elevation':  30,         ## camera's angle of elevation in degrees
-            'azimuth': 45,            ## camera's azimuthal angle in degrees 
-                                      ## (rotation around z-axis 0 points along x-axis)
-            'viewport': None,         ## glViewport params; None == whole widget
-        }
         self.items = []
         self.noRepeatKeys = [QtCore.Qt.Key_Right, QtCore.Qt.Key_Left, QtCore.Qt.Key_Up, QtCore.Qt.Key_Down, QtCore.Qt.Key_PageUp, QtCore.Qt.Key_PageDown]
         self.keysPressed = {}
@@ -67,66 +211,11 @@ class GLViewWidget(QtOpenGL.QGLWidget):
         glClearColor(0.0, 0.0, 0.0, 0.0)
         self.resizeGL(self.width(), self.height())
         
-    def getViewport(self):
-        vp = self.opts['viewport']
-        if vp is None:
-            return (0, 0, self.width(), self.height())
-        else:
-            return vp
-        
+       
     def resizeGL(self, w, h):
         pass
         #glViewport(*self.getViewport())
         #self.update()
-
-    def setProjection(self, region=None):
-        m = self.projectionMatrix(region)
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
-        a = np.array(m.copyDataTo()).reshape((4,4))
-        glMultMatrixf(a.transpose())
-
-    def projectionMatrix(self, region=None):
-        # Xw = (Xnd + 1) * width/2 + X
-        if region is None:
-            region = (0, 0, self.width(), self.height())
-        
-        x0, y0, w, h = self.getViewport()
-        dist = self.opts['distance']
-        fov = self.opts['fov']
-        nearClip = dist * 0.001
-        farClip = dist * 1000.
-
-        r = nearClip * np.tan(fov * 0.5 * np.pi / 180.)
-        t = r * h / w
-
-        # convert screen coordinates (region) to normalized device coordinates
-        # Xnd = (Xw - X0) * 2/width - 1
-        ## Note that X0 and width in these equations must be the values used in viewport
-        left  = r * ((region[0]-x0) * (2.0/w) - 1)
-        right = r * ((region[0]+region[2]-x0) * (2.0/w) - 1)
-        bottom = t * ((region[1]-y0) * (2.0/h) - 1)
-        top    = t * ((region[1]+region[3]-y0) * (2.0/h) - 1)
-
-        tr = QtGui.QMatrix4x4()
-        tr.frustum(left, right, bottom, top, nearClip, farClip)
-        return tr
-        
-    def setModelview(self):
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
-        m = self.viewMatrix()
-        a = np.array(m.copyDataTo()).reshape((4,4))
-        glMultMatrixf(a.transpose())
-        
-    def viewMatrix(self):
-        tr = QtGui.QMatrix4x4()
-        tr.translate( 0.0, 0.0, -self.opts['distance'])
-        tr.rotate(self.opts['elevation']-90, 1, 0, 0)
-        tr.rotate(self.opts['azimuth']+90, 0, 0, -1)
-        center = self.opts['center']
-        tr.translate(-center.x(), -center.y(), -center.z())
-        return tr
 
     def itemsAt(self, region=None):
         #buf = np.zeros(100000, dtype=np.uint)
@@ -203,79 +292,9 @@ class GLViewWidget(QtOpenGL.QGLWidget):
                 finally:
                     glMatrixMode(GL_MODELVIEW)
                     glPopMatrix()
-            
-    def setCameraPosition(self, pos=None, distance=None, elevation=None, azimuth=None):
-        if distance is not None:
-            self.opts['distance'] = distance
-        if elevation is not None:
-            self.opts['elevation'] = elevation
-        if azimuth is not None:
-            self.opts['azimuth'] = azimuth
-        self.update()
-        
-        
-        
-    def cameraPosition(self):
-        """Return current position of camera based on center, dist, elevation, and azimuth"""
-        center = self.opts['center']
-        dist = self.opts['distance']
-        elev = self.opts['elevation'] * np.pi/180.
-        azim = self.opts['azimuth'] * np.pi/180.
-        
-        pos = Vector(
-            center.x() + dist * np.cos(elev) * np.cos(azim),
-            center.y() + dist * np.cos(elev) * np.sin(azim),
-            center.z() + dist * np.sin(elev)
-        )
-        
-        return pos
 
-    def orbit(self, azim, elev):
-        """Orbits the camera around the center position. *azim* and *elev* are given in degrees."""
-        self.opts['azimuth'] += azim
-        #self.opts['elevation'] += elev
-        self.opts['elevation'] = np.clip(self.opts['elevation'] + elev, -90, 90)
-        self.update()
-        
-    def pan(self, dx, dy, dz, relative=False):
-        """
-        Moves the center (look-at) position while holding the camera in place. 
-        
-        If relative=True, then the coordinates are interpreted such that x
-        if in the global xy plane and points to the right side of the view, y is
-        in the global xy plane and orthogonal to x, and z points in the global z
-        direction. Distances are scaled roughly such that a value of 1.0 moves
-        by one pixel on screen.
-        
-        """
-        if not relative:
-            self.opts['center'] += QtGui.QVector3D(dx, dy, dz)
-        else:
-            cPos = self.cameraPosition()
-            cVec = self.opts['center'] - cPos
-            dist = cVec.length()  ## distance from camera to center
-            xDist = dist * 2. * np.tan(0.5 * self.opts['fov'] * np.pi / 180.)  ## approx. width of view at distance of center point
-            xScale = xDist / self.width()
-            zVec = QtGui.QVector3D(0,0,1)
-            xVec = QtGui.QVector3D.crossProduct(zVec, cVec).normalized()
-            yVec = QtGui.QVector3D.crossProduct(xVec, zVec).normalized()
-            self.opts['center'] = self.opts['center'] + xVec * xScale * dx + yVec * xScale * dy + zVec * xScale * dz
-        self.update()
-        
-    def pixelSize(self, pos):
-        """
-        Return the approximate size of a screen pixel at the location pos
-        Pos may be a Vector or an (N,3) array of locations
-        """
-        cam = self.cameraPosition()
-        if isinstance(pos, np.ndarray):
-            cam = np.array(cam).reshape((1,)*(pos.ndim-1)+(3,))
-            dist = ((pos-cam)**2).sum(axis=-1)**0.5
-        else:
-            dist = (pos-cam).length()
-        xDist = dist * 2. * np.tan(0.5 * self.opts['fov'] * np.pi / 180.)
-        return xDist / self.width()
-        
+      
+       
     def mousePressEvent(self, ev):
         self.mousePos = ev.pos()
         
@@ -297,10 +316,9 @@ class GLViewWidget(QtOpenGL.QGLWidget):
         
     def wheelEvent(self, ev):
         if (ev.modifiers() & QtCore.Qt.ControlModifier):
-            self.opts['fov'] *= 0.999**ev.delta()
+            self.zoom(ev.delta(), mod=True)
         else:
-            self.opts['distance'] *= 0.999**ev.delta()
-        self.update()
+            self.zoom(ev.delta())
 
     def keyPressEvent(self, ev):
         if ev.key() in self.noRepeatKeys:
@@ -401,7 +419,7 @@ class GLViewWidget(QtOpenGL.QGLWidget):
             ## create teture
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texwidth, texwidth, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.transpose((1,0,2)))
             
-            self.opts['viewport'] = (0, 0, w, h)  # viewport is the complete image; this ensures that paintGL(region=...) 
+            self.setViewport((0, 0, w, h))  # viewport is the complete image; this ensures that paintGL(region=...) 
                                                   # is interpreted correctly.
             p2 = 2 * padding
             for x in range(-padding, w-padding, texwidth-p2):
@@ -422,7 +440,7 @@ class GLViewWidget(QtOpenGL.QGLWidget):
                     output[x+padding:x2-padding, y+padding:y2-padding] = data[padding:w2-padding, -(h2-padding):-padding]
                     
         finally:
-            self.opts['viewport'] = None
+            self.setViewport(None)
             glfbo.glBindFramebuffer(glfbo.GL_FRAMEBUFFER, 0)
             glBindTexture(GL_TEXTURE_2D, 0)
             if tex is not None:
@@ -433,80 +451,80 @@ class GLViewWidget(QtOpenGL.QGLWidget):
         return output
         
 
-class GLViewWidget2D(GLViewWidget):
-    def __init__(self, parent=None, center_default=None,
-            fov_default=None):
-        super(GLViewWidget2D, self).__init__(parent)
-        self.opts = {}
-        if center_default is None:
-            self.opts['center_default'] = np.asarray([0., 0.],
-                                        dtype='float')
-        else:
-            self.opts['center_default'] = np.asarray(center_default,
-                    dtype='float')
-        self.opts['center'] = self.opts['center_default'].copy()
-        if fov_default is None:
-            self.opts['fov_default'] = np.asarray([2., 2.], 
-                    dtype='float')
-        else:
-            self.opts['fov_default'] = np.asarray(fov_default,
-                    dtype='float')
-        self.opts['fov'] = self.opts['fov_default'].copy()
-        self.opts['viewport'] = None
-        self.opts['distance'] = None
-
-    def setProjection(self, region=None):
-        ## Create the projection matrix
-        glMatrixMode(GL_PROJECTION)
-        glLoadIdentity()
-        center = self.opts['center']
-        fov = self.opts['fov']
-        x0 = center[0]-fov[0]/2.
-        xend = center[0]+fov[0]/2.
-        y0 = center[1]-fov[1]/2.
-        yend = center[1]+fov[1]/2.
-        glOrtho(x0, xend, y0, yend, 0,100)
-
-    def setModelview(self):
-        glMatrixMode(GL_MODELVIEW)
-        glLoadIdentity()
-
-    def pan(self, dx, dy):
-        self.opts['center'] = np.array([self.opts['center'][0]-dx,
-                                self.opts['center'][1]+dy])
-        self.update()
-
-    def zoom(self, factor):
-        self.opts['fov'] *= factor
-        self.update()
-
-    def mousePressEvent(self, ev):
-        self.mousePos = ev.pos()
-        if ev.buttons() == QtCore.Qt.RightButton:
-            self.opts['center'] = self.opts['center_default'].copy()
-            self.opts['fov'] = self.opts['fov_default'].copy()
-            self.update()
-
-    def mouseMoveEvent(self, ev):
-        diff = ev.pos() - self.mousePos
-        self.mousePos = ev.pos()
-        if ev.buttons() == QtCore.Qt.LeftButton:
-            dx = np.float(diff.x())/self.width()*self.opts['fov'][0]
-            dy = np.float(diff.y())/self.height()*self.opts['fov'][1]
-            self.pan(dx, dy)
-
-    def mouseReleaseEvent(self, ev):
-        pass
-
-    def wheelEvent(self, ev):
-        pos = ev.pos()
-        x0 = self.opts['center'][0]
-        y0 = self.opts['center'][1]
-        x = x0+(pos.x()/np.float(self.width())-0.5)*self.opts['fov'][0]
-        y = y0+(0.5-pos.y()/np.float(self.height()))*self.opts['fov'][1]
-        dx = (x0-x)*(1-0.999**ev.delta())
-        dy = (y0-y)*(1-0.999**ev.delta())
-        self.opts['center'][1] -= dy
-        self.opts['center'][0] -= dx
-        self.zoom(0.999**ev.delta())
- 
+#class GLViewWidget2D(GLViewWidget):
+#    def __init__(self, parent=None, center_default=None,
+#            fov_default=None):
+#        super(GLViewWidget2D, self).__init__(parent)
+#        self.opts = {}
+#        if center_default is None:
+#            self.opts['center_default'] = np.asarray([0., 0.],
+#                                        dtype='float')
+#        else:
+#            self.opts['center_default'] = np.asarray(center_default,
+#                    dtype='float')
+#        self.opts['center'] = self.opts['center_default'].copy()
+#        if fov_default is None:
+#            self.opts['fov_default'] = np.asarray([2., 2.], 
+#                    dtype='float')
+#        else:
+#            self.opts['fov_default'] = np.asarray(fov_default,
+#                    dtype='float')
+#        self.opts['fov'] = self.opts['fov_default'].copy()
+#        self.opts['viewport'] = None
+#        self.opts['distance'] = None
+#
+#    def setProjection(self, region=None):
+#        ## Create the projection matrix
+#        glMatrixMode(GL_PROJECTION)
+#        glLoadIdentity()
+#        center = self.opts['center']
+#        fov = self.opts['fov']
+#        x0 = center[0]-fov[0]/2.
+#        xend = center[0]+fov[0]/2.
+#        y0 = center[1]-fov[1]/2.
+#        yend = center[1]+fov[1]/2.
+#        glOrtho(x0, xend, y0, yend, 0,100)
+#
+#    def setModelview(self):
+#        glMatrixMode(GL_MODELVIEW)
+#        glLoadIdentity()
+#
+#    def pan(self, dx, dy):
+#        self.opts['center'] = np.array([self.opts['center'][0]-dx,
+#                                self.opts['center'][1]+dy])
+#        self.update()
+#
+#    def zoom(self, factor):
+#        self.opts['fov'] *= factor
+#        self.update()
+#
+#    def mousePressEvent(self, ev):
+#        self.mousePos = ev.pos()
+#        if ev.buttons() == QtCore.Qt.RightButton:
+#            self.opts['center'] = self.opts['center_default'].copy()
+#            self.opts['fov'] = self.opts['fov_default'].copy()
+#            self.update()
+#
+#    def mouseMoveEvent(self, ev):
+#        diff = ev.pos() - self.mousePos
+#        self.mousePos = ev.pos()
+#        if ev.buttons() == QtCore.Qt.LeftButton:
+#            dx = np.float(diff.x())/self.width()*self.opts['fov'][0]
+#            dy = np.float(diff.y())/self.height()*self.opts['fov'][1]
+#            self.pan(dx, dy)
+#
+#    def mouseReleaseEvent(self, ev):
+#        pass
+#
+#    def wheelEvent(self, ev):
+#        pos = ev.pos()
+#        x0 = self.opts['center'][0]
+#        y0 = self.opts['center'][1]
+#        x = x0+(pos.x()/np.float(self.width())-0.5)*self.opts['fov'][0]
+#        y = y0+(0.5-pos.y()/np.float(self.height()))*self.opts['fov'][1]
+#        dx = (x0-x)*(1-0.999**ev.delta())
+#        dy = (y0-y)*(1-0.999**ev.delta())
+#        self.opts['center'][1] -= dy
+#        self.opts['center'][0] -= dx
+#        self.zoom(0.999**ev.delta())
+# 
