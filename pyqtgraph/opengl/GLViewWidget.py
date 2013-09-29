@@ -7,7 +7,7 @@ import pyqtgraph.functions as fn
 
 ##Vector = QtGui.QVector3D
 
-class GLCamera3D(QtGui.QWidget):
+class GLCamera3D(QtOpenGL.QGLWidget):
     def __init__(self, *args, **kwargs):
         super(GLCamera3D, self).__init__(*args, **kwargs)
         self.opts = {
@@ -157,7 +157,7 @@ class GLCamera3D(QtGui.QWidget):
         self.opts['viewport'] = viewport
      
 
-class GLCamera2D(QtGui.QWidget):
+class GLCamera2D(QtOpenGL.QGLWidget):
     def __init__(self, *args, **kwargs):
         super(GLCamera2D, self).__init__(*args, **kwargs)
         self.opts = {
@@ -252,7 +252,7 @@ class GLCamera2D(QtGui.QWidget):
     def setViewport(self, viewport):
         self.opts['viewport'] = viewport
      
- 
+
 class GLViewWidgetBase(QtOpenGL.QGLWidget):
     """
     Basic widget for displaying 3D data
@@ -546,9 +546,17 @@ class GLViewWidgetBase(QtOpenGL.QGLWidget):
         
 
 class GLViewWidget(GLViewWidgetBase, GLCamera3D):
-    pass
+    def __init__(self, parent=None):
+        #GLViewWidgetBase.__init__(self, parent)
+        #GLCamera3D.__init__(self)
+        super(GLViewWidget, self).__init__(parent)
 
 class GLViewWidget2D(GLViewWidgetBase, GLCamera2D):
+    def __init__(self, parent=None):
+        #GLViewWidgetBase.__init__(self, parent)
+        #GLCamera2D.__init__(self)
+        super(GLViewWidget2D, self).__init__(parent)
+
     def evalKeyState(self):
         speed = 1.0
         if len(self.keysPressed) > 0:
