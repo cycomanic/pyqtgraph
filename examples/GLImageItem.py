@@ -16,7 +16,7 @@ import scipy.ndimage as ndi
 
 app = QtGui.QApplication([])
 w = gl.GLViewWidget()
-w.opts['distance'] = 200
+w.camera.distance = 200
 w.show()
 w.setWindowTitle('pyqtgraph example: GLImageItem')
 

@@ -11,7 +11,7 @@ import pyqtgraph.opengl as gl
 
 app = QtGui.QApplication([])
 w = gl.GLViewWidget()
-w.opts['distance'] = 20
+w.camera.distance = 20
 w.show()
 w.setWindowTitle('pyqtgraph example: GLViewWidget')
 

@@ -13,7 +13,7 @@ import numpy as np
 
 app = QtGui.QApplication([])
 w = gl.GLViewWidget()
-w.opts['distance'] = 40
+w.camera.distance = 40
 w.show()
 w.setWindowTitle('pyqtgraph example: GLLinePlotItem')
 
