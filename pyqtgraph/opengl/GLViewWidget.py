@@ -72,11 +72,11 @@ class GLCamera2D(GLCamera3D):
                 azimuth)
 
     def _setElevation(self, elevation):
-        raise Warning("2D Camera does not allow setting elevation, use 3D camera instead")
+        pass #raise Warning("2D Camera does not allow setting elevation, use 3D camera instead")
 
     def _getElevation(self):
         return 90
-    property(_getElevation, _setElevation)
+    elevation = property(_getElevation, _setElevation)
 
  
 
@@ -158,6 +158,7 @@ class GLViewWidget(QtOpenGL.QGLWidget):
         self.camera.azimuth += azim
         #self.opts['elevation'] += elev
         self.camera.elevation = self.camera.elevation + elev
+        print self.camera.elevation
         self.update()
 
     def pixelSize(self, pos):
@@ -533,8 +534,8 @@ class GLViewWidget2D(GLViewWidget):
         diff = ev.pos() - self.mousePos
         self.mousePos = ev.pos()
         
-        if ev.buttons() == QtCore.Qt.MidButton:
-            self.orbit(-diff.x(), diff.y())
+        if ev.buttons() == QtCore.Qt.RightButton:
+            self.orbit(diff.x(), diff.y())
         elif ev.buttons() == QtCore.Qt.LeftButton:
             if (ev.modifiers() & QtCore.Qt.ControlModifier):
                 self.pan(-diff.x(), -diff.y(), 0, relative=False)
