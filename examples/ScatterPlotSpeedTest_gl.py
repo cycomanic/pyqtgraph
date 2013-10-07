@@ -35,7 +35,7 @@ ui.setupUi(win)
 win.show()
 
 p = ui.plot
-N = 5e5
+N = 5e4
 
 data = np.random.normal(size=(50,N,3))
 data[:,:,2] = 0
